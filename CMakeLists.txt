@@ -10,6 +10,5 @@ add_subdirectory("dependencies/zydis")
 file(GLOB source_list "src/*")
 add_library(AssemblyAnalyzer STATIC ${source_list})
 target_compile_definitions(AssemblyAnalyzer PRIVATE BUILDING_ASSEMBLY_ANALYZER)
-target_compile_definitions(AssemblyAnalyzer PUBLIC ASSEMBLY_ANALYZER_SHARED)
 
 target_link_libraries(AssemblyAnalyzer PRIVATE "Zydis")

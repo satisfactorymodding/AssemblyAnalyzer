@@ -1,23 +1,20 @@
 #include "AssemblyAnalyzer.h"
 #include <Zydis/Decoder.h>
-#include <Zydis/Formatter.h>
 #include <Zydis/Utils.h>
 
-//Struct that holds the information about function
-struct FunctionInfo {
-    //Whenever pointer represents a valid function at all
-    bool bIsValid;
-    //Whenever this function represents a virtual function call thunk and doesn't represent the real function
-    bool bIsVirtualFunction;
-    //Real resolved function address, or NULL if this function represents a virtual function
-    void* RealFunctionAddress;
-    //Offset to the function pointer inside of the vtable, if bIsVirtualFunction is set
-    uint32_t VirtualTableFunctionOffset;
-};
-
-//Tests for simple thunks in "jmp SomeRVA" form. These thunks are usually emitted when building in the debug configuration
+//Tests for simple thunks in "jmp RelativeAddress" form. These thunks are usually emitted when building in the debug configuration
 bool IsJumpThunkInstruction(const ZydisDecodedInstruction& Instruction) {
-    return Instruction.mnemonic == ZydisMnemonic::ZYDIS_MNEMONIC_JMP && Instruction.operands[0].type == ZydisOperandType::ZYDIS_OPERAND_TYPE_IMMEDIATE;
+    return Instruction.mnemonic == ZydisMnemonic::ZYDIS_MNEMONIC_JMP &&
+        Instruction.operands[0].type == ZydisOperandType::ZYDIS_OPERAND_TYPE_IMMEDIATE;
+}
+
+//Tests for simple thunks in "jmp [RIP + RelativeAddress]" form. These are usually generated to wrap bare import table functions
+bool IsIndirectJumpThunkInstruction(const ZydisDecodedInstruction& Instruction) {
+    return Instruction.mnemonic == ZydisMnemonic::ZYDIS_MNEMONIC_JMP &&
+        Instruction.operands[0].type == ZydisOperandType::ZYDIS_OPERAND_TYPE_MEMORY &&
+        Instruction.operands[0].mem.base == ZydisRegister::ZYDIS_REGISTER_RIP &&
+        Instruction.operands[0].mem.index == ZydisRegister::ZYDIS_REGISTER_NONE &&
+        Instruction.operands[0].mem.disp.has_displacement;
 }
 
 //basically tests for assembly sequence: mov rax, [rcx] which is used to retrieve virtual table pointer from the object pointer
@@ -45,7 +42,7 @@ bool IsVirtualTableJumpThunkInstruction(const ZydisDecodedInstruction& Instructi
 
 //Performs code discovery for the function located at the given offset, determining it's kind and real address
 //by going through thunks if it's necessary and returns info about the final function
-FunctionInfo DiscoverRealFunctionAddress(uint8_t* FunctionPtr) {
+FunctionInfo DiscoverFunction(uint8_t* FunctionPtr) {
     ZydisDecoder decoder;
     ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64);
 
@@ -60,12 +57,19 @@ FunctionInfo DiscoverRealFunctionAddress(uint8_t* FunctionPtr) {
     //test for simple in-module jump thunk
     if (IsJumpThunkInstruction(Instruction)) {
         ZyanU64 ResultJumpAddress;
-        ZydisCalcAbsoluteAddress(&Instruction, &Instruction.operands[0], (ZyanU64) FunctionPtr, &ResultJumpAddress);
-        return DiscoverRealFunctionAddress((uint8_t*) ResultJumpAddress);
+        const bool bSuccessCalculation = ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&Instruction, &Instruction.operands[0], (ZyanU64) FunctionPtr, &ResultJumpAddress));
+        assert(bSuccessCalculation);
+        return DiscoverFunction((uint8_t*) ResultJumpAddress);
     }
 
-    //TODO test for import table jump: jmp cs:__imp_??0ExampleLibraryClass@@QEAA@XZ
-    //TODO need to figure out how it actually looks in the Zydis representation
+    //test for indirect jump thunks, usually encountered in import table functions wrappers
+    if (IsIndirectJumpThunkInstruction(Instruction)) {
+        ZyanU64 ResultMemoryLocation;
+        const bool bSuccessCalculation = ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&Instruction, &Instruction.operands[0], (ZyanU64) FunctionPtr, &ResultMemoryLocation));
+        assert(bSuccessCalculation);
+        uint8_t* ResultJumpAddress = *(uint8_t**) ResultMemoryLocation;
+        return DiscoverFunction(ResultJumpAddress);
+    }
 
     //test for virtual table call thunk
     if (IsFirstVirtualTableCallThunkInstruction(Instruction)) {
@@ -89,9 +93,3 @@ FunctionInfo DiscoverRealFunctionAddress(uint8_t* FunctionPtr) {
     //We can assume this is correct function pointer now
     return FunctionInfo{true, false, FunctionPtr};
 }
-
-//Layout of the __DefaultConstructor functions from UE is as follows:
-//mov     rcx, [rcx]
-//test    rcx, rcx
-//jnz     AFGBuildableFoundation::AFGBuildableFoundation(void)
-//retn
