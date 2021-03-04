@@ -1,0 +1,10 @@
+
+#ifdef ASSEMBLY_ANALYZER_SHARED
+ #ifdef BUILDING_ASSEMBLY_ANALYZER
+  #define AA_API __declspec(dllexport)
+ #else //BUILDING_ASSEMBLY_ANALYZER
+  #define AA_API __declspec(dllimport)
+ #endif //BUILDING_ASSEMBLY_ANALYZER
+#else //ASSEMBLY_ANALYZER_SHARED
+ #define AA_API
+#endif //ASSEMBLY_ANALYZER_SHARED
