@@ -20,6 +20,11 @@ struct FunctionInfo {
     unsigned int VirtualTableFunctionOffset;
 };
 
+typedef void(*LogDebugMessageFunctionType)(const char*);
+
+/** Sets up function used for debugging logging, if it's enabled by build configuration */
+AA_API void SetDebugLoggingHook(LogDebugMessageFunctionType LogDebugMessage);
+
 /**
  * Performs analysis of the provided function pointer, resolving details such as
  * real code pointer (excluding thunks), whenever it is a virtual function thunk,

@@ -1,6 +1,17 @@
 #include "AssemblyAnalyzer.h"
 #include <Zydis/Decoder.h>
 #include <Zydis/Utils.h>
+#include <Zydis/Formatter.h>
+
+#define DEBUG_ASSEMBLY_ANALYZER 0
+
+static LogDebugMessageFunctionType LogDebugMessageFunc = nullptr;
+
+void SetDebugLoggingHook(LogDebugMessageFunctionType LogDebugMessage) {
+#if DEBUG_ASSEMBLY_ANALYZER
+    LogDebugMessageFunc = LogDebugMessage;
+#endif
+}
 
 //Tests for simple thunks in "jmp RelativeAddress" form. These thunks are usually emitted when building in the debug configuration
 bool IsJumpThunkInstruction(const ZydisDecodedInstruction& Instruction) {
@@ -53,6 +64,16 @@ FunctionInfo DiscoverFunction(uint8_t* FunctionPtr) {
         //Invalid sequence - not an instruction
         return FunctionInfo{false};
     }
+
+#if DEBUG_ASSEMBLY_ANALYZER
+    ZydisFormatter Formatter;
+    ZydisFormatterInit(&Formatter, ZYDIS_FORMATTER_STYLE_INTEL);
+    char InstructionBuffer[512];
+    ZydisFormatterFormatInstruction(&Formatter, &Instruction, InstructionBuffer, 512, (uint64_t) FunctionPtr);
+    if (LogDebugMessageFunc != nullptr) {
+        LogDebugMessageFunc(InstructionBuffer);
+    }
+#endif
 
     //test for simple in-module jump thunk
     if (IsJumpThunkInstruction(Instruction)) {
